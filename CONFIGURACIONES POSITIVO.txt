@@ -1,0 +1,2936 @@
+#include <iostream>
+#include <sstream>
+#include <vector>
+#include <string>
+#include <fstream>
+#include <limits>
+using namespace std;
+
+
+
+// Prototipos de funciones
+
+
+void configurarCisco867Internet();
+void configurarCisco867SIP_FTTx();
+void configurarCisco867MPLS_BGP();
+void configurarCisco867SIP_FTTO();
+void configurarCiscoC1111Internet();
+void configurarHuaweiAR161Internet();
+void configurarHuaweiAR611Internet();
+void configurarHuaweiAR611MPLS_BGP();
+void configurarHuaweiAR617Internet();
+void configurarHuaweiAR617SIP_FTTX();
+void configurarHuaweiAR617MPLS_BGP();
+void configurarHuaweiAR617SIP_FTTO();
+void configurarHuaweiAR651Internet();
+void configurarMikrotikRB750Internet();
+void configurarMikrotikRB750MPLS_BGP();
+void configurarMikrotikRB750SIP_FTTO();
+void configurarHuaweiAR1220Internet();
+void configurarDemarcadorRAX711Internet();
+void configurarDemarcadorTenGigaInternet();
+
+// ===== Validaciones =====
+bool validarIP(const string& ip) {
+    stringstream ss(ip);
+    string segmento;
+    int count = 0;
+    while (getline(ss, segmento, '.')) {
+        if (segmento.empty()) return false;
+        try {
+            int valor = stoi(segmento);
+            if (valor < 0 || valor > 255) return false;
+        } catch (...) { return false; }
+        count++;
+    }
+    return (count == 4);
+}
+
+bool validarVLAN(const string& vlan) {
+    try {
+        int valor = stoi(vlan);
+        return (valor >= 2 && valor <= 4094);
+    } catch (...) { return false; }
+}
+
+// ===== Calculadora IP =====
+vector<int> ipToVector(const string& ip) {
+    vector<int> octetos;
+    stringstream ss(ip);
+    string segmento;
+    while (getline(ss, segmento, '.')) octetos.push_back(stoi(segmento));
+    return octetos;
+}
+
+string vectorToIp(const vector<int>& o) {
+    return to_string(o[0]) + "." + to_string(o[1]) + "." +
+           to_string(o[2]) + "." + to_string(o[3]);
+}
+
+vector<int> prefixToMask(int p) {
+    vector<int> m(4,0);
+    for (int i=0; i<4; i++) {
+        if (p >= 8) { m[i] = 255; p -= 8; }
+        else if (p > 0) { m[i] = (256 - (1 << (8-p))); p = 0; }
+    }
+    return m;
+}
+
+vector<int> maskToWildcard(const vector<int>& m) {
+    vector<int> w(4);
+    for (int i=0; i<4; i++) w[i] = 255 - m[i];
+    return w;
+}
+
+vector<int> calcularNetwork(const vector<int>& ip, const vector<int>& m) {
+    vector<int> n(4);
+    for (int i=0; i<4; i++) n[i] = ip[i] & m[i];
+    return n;
+}
+
+vector<int> calcularBroadcast(const vector<int>& ip, const vector<int>& m) {
+    vector<int> b(4);
+    for (int i=0; i<4; i++) b[i] = ip[i] | (255 - m[i]);
+    return b;
+}
+
+vector<int> sumarIp(const vector<int>& ip, int delta) {
+    unsigned int val = (ip[0]<<24) | (ip[1]<<16) | (ip[2]<<8) | ip[3];
+    val += delta;
+    vector<int> r(4);
+    r[0] = (val>>24) & 255;
+    r[1] = (val>>16) & 255;
+    r[2] = (val>>8) & 255;
+    r[3] = val & 255;
+    return r;
+}
+
+// ===== Plantilla Huawei AR617 - Internet =====
+void configurarHuaweiAR617Internet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    char opcionDHCP;
+
+    cout << "=== Configuracion de Router Huawei 617 ===" << endl;
+
+    cout << "Nombre del cliente (MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio(MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN pública
+    do {
+        cout << "Direccion IP LAN publica: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 29 o 30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    cout << "Desea habilitar DHCP? (s/n): ";
+    cin >> opcionDHCP;
+    cin.ignore();
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        do {
+            cout << "Direccionamiento privado (ej: 192.168.1.0): ";
+            getline(cin, ipPrivada);
+        } while (!validarIP(ipPrivada));
+        cout << "Mascara direccionamiento privado (por defecto 24): ";
+        getline(cin, mascaraPrivada);
+        if (mascaraPrivada.empty()) mascaraPrivada = "24";
+    }
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada (si aplica) =====
+    vector<int> ipVecPriv, maskPriv, networkPriv, hostMinPriv, wildcardPriv;
+    int prefijoPriv = 0;
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        prefijoPriv = stoi(mascaraPrivada);
+        ipVecPriv = ipToVector(ipPrivada);
+        maskPriv = prefixToMask(prefijoPriv);
+        networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+        hostMinPriv = sumarIp(networkPriv, 1);
+        wildcardPriv = maskToWildcard(maskPriv);
+    }
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandosysname = "sysname " + prefijo + "_" + codigoServicio;
+
+   cout << "\033[33m=== COMANDOS DE CONFIGURACION HUAWEI 617 ===\033[0m" << endl;
+    cout << comandosysname << endl;
+
+    cout << "" << endl;
+    // WAN
+    cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+    cout << " description --WAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << " dot1q termination vid " << vlan << endl;
+cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+ cout << "quit" << endl;
+ cout << "" << endl;
+    cout << "ip route-static 0.0.0.0 0.0.0.0 GigabitEthernet0/0/4." << vlan
+         << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "" << endl;
+    cout << "acl number 2300" << endl;
+cout << " rule 1 permit source " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+ cout << "" << endl;
+    cout << "interface GigabitEthernet0/0/4" << endl;
+    cout << " combo-port copper\n undo negotiation auto\n speed 1000\n duplex full\n quit\n" << endl;
+    cout << "" << endl;
+    
+
+    // LAN
+    cout << "interface Vlanif1" << endl;
+    cout << " description --LAN INTERNET --" << codigoServicio << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+     
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        cout << " ip address " << vectorToIp(hostMinPriv) << " " << vectorToIp(maskPriv) << " sub" << endl;
+        cout << " dhcp select global" << endl;
+        cout << "quit" << endl;
+        cout << "" << endl;
+        cout << "nat address-group 1 " << vectorToIp(networkLAN) << " " << vectorToIp(networkLAN) << endl;
+        cout << "" << endl;
+	cout << "acl number 2000" << endl;
+        cout << " rule 1 permit source " << vectorToIp(networkPriv) << " " << vectorToIp(wildcardPriv) << endl;
+        cout << "quit" << endl;        
+        cout << "" << endl;
+        cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+        cout << " nat outbound 2000 address-group 1" << endl;
+        cout << "quit" << endl;
+        cout << "" << endl;
+        cout << "ip pool DHCP-LAN_privada" << endl;
+        cout << " gateway-list " << vectorToIp(hostMinPriv) << endl;
+        cout << " network " << vectorToIp(networkPriv) << " mask " << vectorToIp(maskPriv) << endl;
+        cout << " dns-list 190.157.8.33 200.14.207.210" << endl;
+    }
+
+    cout << "\033[33m=================================\033[0m" << endl;
+}
+
+// ===== Plantilla Cisco 867 - Internet =====
+void configurarCisco867Internet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    char opcionDHCP;
+    int puertoWAN; // nuevo dato
+
+    cout << "=== CONFIGURACION DE ROUTER CISCO 867 INTERNET ===" << endl;
+
+    cout << "Nombre del cliente(MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio(MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // Preguntar puerto WAN
+    do {
+        cout << "En que puerto desea configurar su WAN (ej: 1, 2): ";
+        cin >> puertoWAN;
+        cin.ignore();
+    } while(puertoWAN < 1 || puertoWAN > 2);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN pública
+    do {
+        cout << "Direccion IP LAN publica: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 29 o 30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    cout << "Desea habilitar DHCP? (s/n): ";
+    cin >> opcionDHCP;
+    cin.ignore();
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        do {
+            cout << "Direccionamiento privado (ej: 192.168.1.0): ";
+            getline(cin, ipPrivada);
+        } while (!validarIP(ipPrivada));
+        cout << "Mascara direccionamiento privado (por defecto 24): ";
+        getline(cin, mascaraPrivada);
+        if (mascaraPrivada.empty()) mascaraPrivada = "24";
+    }
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada (si aplica) =====
+    vector<int> ipVecPriv, maskPriv, networkPriv, hostMinPriv, wildcardPriv;
+    int prefijoPriv = 0;
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        prefijoPriv = stoi(mascaraPrivada);
+        ipVecPriv = ipToVector(ipPrivada);
+        maskPriv = prefixToMask(prefijoPriv);
+        networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+        hostMinPriv = sumarIp(networkPriv, 1);
+        wildcardPriv = maskToWildcard(maskPriv);
+    }
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoHostname = "hostname " + prefijo + "_" + codigoServicio;
+
+    cout << "\n \033[33m=== COMANDOS DE CONFIGURACION CISCO 867 INTERNET ===\033[0m" << endl;
+    cout << comandoHostname << endl;
+
+    // WAN
+    cout << "interface GigabitEthernet" << puertoWAN << "." << vlan << endl;
+    cout << " description WAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << " encapsulation dot1Q " << vlan << endl;
+    cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+    cout << "exit" << endl;
+    cout << "!" << endl;
+    cout << "ip route 0.0.0.0 0.0.0.0 " << vectorToIp(hostMinWAN) << endl;
+    cout << "!" << endl;
+    cout << "access-list 23 permit " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << "!" << endl;
+    cout << "interface GigabitEthernet" << puertoWAN << endl;
+    cout << " no shutdown" << endl;
+    cout << " duplex full" << endl;
+    cout << " speed 1000" << endl;
+    cout << "exit" << endl;
+    cout << "!" << endl;
+
+    // LAN
+    cout << "interface Vlan1" << endl;
+    cout << " description -- LAN INTERNET_" << codigoServicio << "--" << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        cout << " ip address " << vectorToIp(hostMinPriv) << " " << vectorToIp(maskPriv) << " secondary" << endl;
+        cout << " ip nat inside" << endl;
+        cout << "exit" << endl;
+        cout << "!" << endl;
+
+        cout << "ip nat pool INTERNET " << vectorToIp(hostMinLAN) << " " << vectorToIp(hostMinLAN)
+             << " prefix-length " << prefijoLAN << endl;
+        cout << "ip nat inside source list 1 pool INTERNET overload" << endl;
+        cout << "!" << endl;
+
+        cout << "access-list 1 permit " << vectorToIp(networkPriv) << " " << vectorToIp(wildcardPriv) << endl;
+        cout << "!" << endl;
+
+        cout << "interface GigabitEthernet" << puertoWAN << "." << vlan << endl;
+        cout << " ip nat outside" << endl;
+        cout << "exit" << endl;
+        cout << "!" << endl;
+
+        cout << "ip dhcp pool INTERNET" << endl;
+        cout << " network " << vectorToIp(networkPriv) << endl;
+        cout << " default-router " << vectorToIp(hostMinPriv) << endl;
+        cout << " dns-server 190.157.8.33 200.14.207.210" << endl;
+        cout << "!" << endl;
+    }
+
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Cisco C1111 - Internet =====
+void configurarCiscoC1111Internet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    char opcionDHCP;
+
+    cout << "=== Configuracion de Router Cisco C1111 ===" << endl;
+
+    cout << "Nombre del cliente(MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio(MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN pública
+    do {
+        cout << "Direccion IP LAN publica: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 29 o 30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    cout << "Desea habilitar DHCP? (s/n): ";
+    cin >> opcionDHCP;
+    cin.ignore();
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        do {
+            cout << "Direccionamiento privado (ej: 192.168.1.0): ";
+            getline(cin, ipPrivada);
+        } while (!validarIP(ipPrivada));
+        cout << "Mascara direccionamiento privado (por defecto 24): ";
+        getline(cin, mascaraPrivada);
+        if (mascaraPrivada.empty()) mascaraPrivada = "24";
+    }
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada (si aplica) =====
+    vector<int> ipVecPriv, maskPriv, networkPriv, hostMinPriv, wildcardPriv;
+    int prefijoPriv = 0;
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        prefijoPriv = stoi(mascaraPrivada);
+        ipVecPriv = ipToVector(ipPrivada);
+        maskPriv = prefixToMask(prefijoPriv);
+        networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+        hostMinPriv = sumarIp(networkPriv, 1);
+        wildcardPriv = maskToWildcard(maskPriv);
+    }
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoHostname = "hostname " + prefijo + "_" + codigoServicio;
+
+    cout << "\n \033[33m=== COMANDOS DE CONFIGURACION CISCO C1111 ===\033[0m" << endl;
+    cout << comandoHostname << endl;
+
+    // WAN
+    cout << "interface GigabitEthernet0/0/1." << vlan << endl;
+    cout << " description --WAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << " encapsulation dot1Q " << vlan << endl;
+    cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+    cout << " ip nat outside" << endl;
+    cout << "exit" << endl;
+cout << "!" << endl;
+    cout << "ip route 0.0.0.0 0.0.0.0 " << vectorToIp(hostMinWAN) << endl;
+    cout << "!" << endl;
+    cout << "access-list 1300 permit " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << "!" << endl;
+    cout << "interface GigabitEthernet0/0/1" << endl;
+    cout << " no shutdown" << endl;
+    cout << " no negotiation auto" << endl;
+    cout << " duplex full" << endl;
+    cout << " speed 1000" << endl;
+   cout << "exit" << endl;
+cout << "" << endl;
+
+    // LAN
+    cout << "interface Vlan1" << endl;
+    cout << " description --LAN INTERNET --" << codigoServicio << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        cout << " ip address " << vectorToIp(hostMinPriv) << " " << vectorToIp(maskPriv) << " secondary" << endl;
+        cout << " ip nat inside" << endl;
+        cout << "exit" << endl;
+cout << "" << endl;
+        cout << "ip nat pool INTERNET " << vectorToIp(hostMinLAN) << " " << vectorToIp(hostMinLAN)
+             << " prefix-length " << prefijoLAN << endl;
+        cout << "ip nat inside source list 1 pool INTERNET overload" << endl;
+        cout << "!" << endl;
+        cout << "access-list 1 permit " << vectorToIp(networkPriv) << " " << vectorToIp(wildcardPriv) << endl;
+        cout << "!" << endl;
+        cout << "ip dhcp pool INTERNET" << endl;
+        cout << " network " << vectorToIp(networkPriv) << endl;
+        cout << " default-router " << vectorToIp(hostMinPriv) << endl;
+        cout << " dns-server 190.157.8.33 200.14.207.210" << endl;
+        cout << "!" << endl;
+	cout << "end" << endl;
+    }
+
+    cout << "\033[33m=================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+// ===== Plantilla Cisco 867 - MPLS con BGP =====
+void configurarCisco867MPLS_BGP() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, vlan;
+    string ipLAN, mascaraLAN;
+    string ipPrivada, mascaraPrivada;
+    string asBGP; // Sistema Autónomo del BGP
+
+    cout << "=== Configuracion de Router Cisco 867 - MPLS con BGP ===" << endl;
+
+    cout << "Nombre del cliente: "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio: "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN
+    do {
+        cout << "Direccion IP LAN: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 24): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // AS del BGP
+    cout << "AS del BGP (asignado por el PEM): ";
+    getline(cin, asBGP);
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoHostname = "hostname " + prefijo + "_" + codigoServicio;
+
+    cout << "\n\033[33m=== COMANDOS DE CONFIGURACION CISCO 867 MPLS CON BGP ===\033[0m" << endl;
+    cout << comandoHostname << endl;
+    cout << "!" << endl;
+
+    // WAN físico
+    cout << "interface GigabitEthernet1" << endl;
+    cout << " no shutdown" << endl;
+    cout << " duplex full" << endl;
+    cout << " speed 1000" << endl;
+    cout << " exit" << endl;
+    cout << "!" << endl;
+
+    // WAN subinterface
+    cout << "interface GigabitEthernet1." << vlan << endl;
+    cout << " description -- WAN-MPLS-" << codigoServicio << "--" << endl;
+    cout << " encapsulation dot1Q " << vlan << endl;
+    cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+    cout << " exit" << endl;
+    cout << "!" << endl;
+
+    // BGP
+    cout << "router bgp " << asBGP << endl;
+    cout << " bgp log-neighbor-changes" << endl;
+    cout << " neighbor " << vectorToIp(hostMinWAN) << " remote-as 14080" << endl;
+    cout << " neighbor " << vectorToIp(hostMinWAN) << " description WAN--MPLS-" << codigoServicio << "--" << endl;
+    cout << " neighbor " << vectorToIp(hostMinWAN) << " timers 10 30" << endl;
+    cout << " !" << endl;
+    cout << " address-family ipv4" << endl;
+    cout << "  network " << vectorToIp(networkLAN) << " mask " << vectorToIp(maskLAN) << endl;
+    cout << "  neighbor " << vectorToIp(hostMinWAN) << " activate" << endl;
+    cout << " exit-address-family" << endl;
+    cout << "!" << endl;
+
+    // ACL
+    cout << "access-list 23 permit " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << "!" << endl;
+
+    // LAN
+    cout << "interface Vlan1" << endl;
+    cout << " description --LAN-MPLS-" << codigoServicio << "--" << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << "end" << endl;
+
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Huawei AR617 - SIP_FTTX =====
+void configurarHuaweiAR617SIP_FTTX() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    string ipGestion, ipSIP;
+    char opcionDHCP;
+    int puertoLAN;
+    int puertoWAN;
+    string interfazLAN;
+
+    cout << "=== Configuracion de Router Huawei AR617 SIP_FTTX ===" << endl;
+
+    cout << "Nombre del cliente (MAYUSCULA): ";
+    getline(cin, nombreCliente);
+
+    cout << "Codigo de servicio(MAYUSCULA): ";
+    getline(cin, codigoServicio);
+
+    // WAN - IP de gestión
+    do {
+        cout << "Direccion IP de gestion (CPE): ";
+        getline(cin, ipGestion);
+    } while (!validarIP(ipGestion));
+
+    // WAN - IP SIP
+    do {
+        cout << "Direccion IP SIP/RTP: ";
+        getline(cin, ipSIP);
+    } while (!validarIP(ipSIP));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "\n\033[31m== DATO INVALIDO. Ingrese nuevamente.==\033[0m\n" << endl;
+
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN Loopback
+    do {
+        cout << "Direccion IP LAN (Planta): ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 24): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // Preguntar el puerto físico con validación (0-3)
+    do {
+        cout << "¿Qué puerto desea para conexión de la PLANTA? (0-3)? ";
+        cin >> puertoLAN;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n'); // limpiar todo el buffer
+
+        if (puertoLAN < 0 || puertoLAN > 3) {
+            cout << "\n\033[31m== DATO INVALIDO. Ingrese un número entre 0 y 3.==\033[0m\n" << endl;
+        }
+    } while(puertoLAN < 0 || puertoLAN > 3);
+
+    // ===== Calculadora WAN =====
+ vector<int> ipVecWAN = ipToVector(ipGestion); // usar ipGestion
+vector<int> maskWAN = prefixToMask(prefijoWAN);
+vector<int> wildcardWAN = maskToWildcard(maskWAN);
+vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipGestion;
+
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandosysname = "sysname " + prefijo + "_" + codigoServicio;
+
+    cout << "\033[33m=== COMANDOS DE CONFIGURACION HUAWEI 617 SIP_FTTX ===\033[0m" << endl;
+    cout << comandosysname << endl;
+
+    cout << "nat alg rtsp enable" << endl;
+    cout << "nat alg sip enable" << endl;
+    cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+    cout << " description --WAN SIP FTTX--" << codigoServicio << "--" << endl;
+    cout << " dot1q termination vid " << vlan << endl;
+    cout << " ip address " << ipGestion << " " << vectorToIp(maskWAN) << endl;
+    cout << " ip address " << ipSIP << " " << vectorToIp(maskWAN) << " sub" << endl;
+    cout << " nat server global " << ipSIP << " inside " << vectorToIp(sumarIp(hostMinLAN, 1)) << endl;
+    cout << "nat static enable" << endl;
+    cout << "quit" << endl;
+
+    cout << "ip route-static 10.11.0.0 255.255.0.0 GigabitEthernet0/0/4." << vlan << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "acl number 2300" << endl;
+    cout << " rule 2 permit source " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << "interface GigabitEthernet0/0/4" << endl;
+    cout << " combo-port copper\n undo negotiation auto\n speed 1000\n duplex full\n quit\n" << endl;
+
+    // LAN
+    cout << "Vlan 2" << endl;
+    cout << "name SIP_FTTX" << endl;
+    cout << "quit" << endl;
+    cout << "interface Vlanif2" << endl;
+    cout << " description --LAN SIP FTTX --" << codigoServicio << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << "quit" << endl;
+
+    cout << "interface GigabitEthernet0/0/" << puertoLAN << endl;
+    cout << "description --CONEXION PLANTA CLIENTE--" << endl;
+    cout << "port link-type access" << endl;
+    cout << "port default vlan 2" << endl;
+    cout << "quit" << endl;
+
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Huawei AR617 - MPLS con BGP =====
+void configurarHuaweiAR617MPLS_BGP() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, vlan;
+    string ipLAN, mascaraLAN;
+    string asBGP; // Sistema Autónomo del BGP
+
+    cout << "=== Configuracion de Router Huawei AR617 - MPLS con BGP ===" << endl;
+
+    cout << "Nombre del cliente: "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio: "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN
+    do {
+        cout << "Direccion IP LAN: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 24): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // AS del BGP
+    cout << "AS del BGP (asignado por el PEM): ";
+    getline(cin, asBGP);
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Plantilla de Configuración Router Huawei AR617 - MPLS con BGP =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoSysname = "Sysname " + prefijo + "_" + codigoServicio;
+
+    cout << "\n\033[33m=== Comandos de Configuracion Huawei AR617 MPLS con BGP ===\033[0m" << endl;
+    cout << comandoSysname << endl;
+    cout << "" << endl;
+
+    // WAN físico
+    cout << "interface GigabitEthernet0/0/4" << endl;
+    cout << " combo-port copper" << endl;
+    cout << " undo negotiation auto" << endl;
+    cout << " speed 1000" << endl;
+    cout << " duplex full" << endl;
+    cout << " quit" << endl;
+    cout << "" << endl;
+
+    // WAN subinterface
+    cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+    cout << " description --WAN-MPLS-" << codigoServicio << "--" << endl;
+    cout << " dot1q termination vid " << vlan << endl;
+    cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+    cout << " quit" << endl;
+    cout << "" << endl;
+
+    // BGP
+    cout << "bgp " << asBGP << endl;
+    cout << " peer " << vectorToIp(hostMinWAN) << " as-number 14080" << endl;
+    cout << " peer " << vectorToIp(hostMinWAN) << " description WAN--CLARO-" << codigoServicio << "--" << endl;
+    cout << " peer " << vectorToIp(hostMinWAN) << " timer keepalive 10 hold 30" << endl;
+    cout << "y" << endl;
+    cout << " ipv4-family unicast" << endl;
+    cout << "  network " << vectorToIp(networkLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << "  peer " << vectorToIp(hostMinWAN) << " enable" << endl;
+    cout << " quit" << endl;
+    cout << " quit" << endl;
+    cout << "" << endl;
+
+    // ACL
+    cout << "acl number 2300" << endl;
+    cout << " rule 10 permit source " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << " " << endl;
+
+    // LAN
+    cout << "interface Vlanif1" << endl;
+    cout << " description --LAN-MPLS-" << codigoServicio << "--" << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << " quit" << endl;
+    cout << " " << endl;
+    
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+// ===== Plantilla Huawei AR617 - SIP_FTTO =====
+    void configurarHuaweiAR617SIP_FTTO() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    char opcionDHCP;
+    int puertoLAN;
+     
+    
+    cout << "=== Configuracion de Router Huawei AR617 SIP_FTTO ===" << endl;
+
+    cout << "Nombre del cliente (MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio(MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN Loopback
+    do {
+        cout << "Direccion IP LAN (loopback): ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 29 o 30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+    
+   // Preguntar el puerto físico con validación (0-3)
+  do {
+    cout << "¿Qué puerto desea para conexión de la PLANTA? (0-3)? ";
+    cin >> puertoLAN;
+    cin.ignore(); // limpiar buffer
+    if (puertoLAN < 0 || puertoLAN > 3) {
+        cout << "DATO INVALIDO. Ingrese un número entre 0 y 3." << endl;
+    }
+  } while(puertoLAN < 0 || puertoLAN > 3);
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada (si aplica) =====
+    vector<int> ipVecPriv, maskPriv, networkPriv, hostMinPriv, wildcardPriv;
+    int prefijoPriv = 0;
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        prefijoPriv = stoi(mascaraPrivada);
+        ipVecPriv = ipToVector(ipPrivada);
+        maskPriv = prefixToMask(prefijoPriv);
+        networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+        hostMinPriv = sumarIp(networkPriv, 1);
+        wildcardPriv = maskToWildcard(maskPriv);
+    }
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandosysname = "sysname " + prefijo + "_" + codigoServicio;
+
+   cout << "\033[33m=== COMANDOS DE CONFIGURACION HUAWEI 617 SIP_FTTO ===\033[0m" << endl;
+    cout << comandosysname << endl;
+
+    cout << "" << endl;
+    // WAN
+    cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+    cout << " description --WAN SIP --" << codigoServicio << "--" << endl;
+    cout << " dot1q termination vid " << vlan << endl;
+    cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+    cout << "quit" << endl;
+    cout << "" << endl;
+    cout << "ip route-static 10.11.0.0 255.255.255.240 GigabitEthernet0/0/4." << vlan << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "ip route-static 10.11.200.0 255.255.255.240 GigabitEthernet0/0/4." << vlan << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "ip route-static 10.11.255.0 255.255.255.0 GigabitEthernet0/0/4." << vlan << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "ip route-static 10.11.250.0 255.255.255.192 GigabitEthernet0/0/4." << vlan << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "" << endl;
+    cout << "acl number 2300" << endl;
+    cout << " rule 2 permit source " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << "" << endl;
+    cout << "interface GigabitEthernet0/0/4" << endl;
+    cout << " combo-port copper\n undo negotiation auto\n speed 1000\n duplex full\n quit\n" << endl;
+    cout << "" << endl;
+    
+
+    // LAN
+    cout << "Vlan 2" << endl;
+    cout << "name SIP_CENTRALIZADA" << endl;
+    cout << "quit" << endl;
+    cout << "" << endl;
+    cout << "interface Vlanif2" << endl;
+    cout << " description --LAN SIP --" << codigoServicio << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << "quit" << endl;
+    cout << "" << endl;
+    cout << "interface GigabitEthernet0/0/" << puertoLAN << endl;
+    cout << "description ---LAN_SIP--" << endl;
+    cout << "port link-type access" << endl;
+    cout << "port default vlan 2" << endl;
+    cout << "quit" << endl;
+    cout << "" << endl;  
+    cout << "acl name CONTROL-IMS 3998" << endl;
+    cout << " rule 1 permit ip source " << vectorToIp(networkLAN) << " 0.0.0.3 destination 10.11.0.0 0.0.0.15 " << endl;
+    cout << " rule 2 permit ip source " << vectorToIp(networkLAN) << " 0.0.0.3 destination 10.11.200.0 0.0.0.15 " << endl;
+    cout << " rule 3 permit ip source " << vectorToIp(networkLAN) << " 0.0.0.3 destination 10.11.255.0 0.0.0.255 " << endl;
+    cout << " rule 4 permit ip source " << vectorToIp(networkLAN) << " 0.0.0.3 destination 10.11.250.0 0.0.0.63 " << endl;
+    cout << "quit" << endl;        
+    cout << "" << endl;
+    
+    cout << "\033[33m=================================\033[0m" << endl;
+    
+}
+
+// ===== Plantilla Huawei AR651 - Internet =====
+void configurarHuaweiAR651Internet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    int puertoWAN;
+    char opcionDHCP;
+
+    cout << "=== Configuracion de Router Huawei AR651 ===" << endl;
+
+    cout << "Nombre del cliente (MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio(MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // Preguntar el puerto físico con validación (8-9)
+    do {
+        cout << "¿Qué puerto desea para conexión de la WAN? (8-9)? ";
+        cin >> puertoWAN;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n'); // limpiar todo el buffer
+
+        if (puertoWAN < 8 || puertoWAN > 9) {
+            cout << "\n\033[31m== DATO INVALIDO. Ingrese un número entre 8 y 9.==\033[0m\n" << endl;
+        }
+    } while(puertoWAN < 8 || puertoWAN > 9);
+
+ // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "\n\033[31m== DATO INVALIDO. Ingrese nuevamente ==\033[0m\n" << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN pública
+    do {
+        cout << "Direccion IP LAN publica: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 29 o 30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    cout << "Desea habilitar DHCP? (s/n): ";
+    cin >> opcionDHCP;
+    cin.ignore();
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        do {
+            cout << "Direccionamiento privado (ej: 192.168.1.0): ";
+            getline(cin, ipPrivada);
+        } while (!validarIP(ipPrivada));
+        cout << "Mascara direccionamiento privado (por defecto 24): ";
+        getline(cin, mascaraPrivada);
+        if (mascaraPrivada.empty()) mascaraPrivada = "24";
+    }
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada (si aplica) =====
+    vector<int> ipVecPriv, maskPriv, networkPriv, hostMinPriv, wildcardPriv;
+    int prefijoPriv = 0;
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        prefijoPriv = stoi(mascaraPrivada);
+        ipVecPriv = ipToVector(ipPrivada);
+        maskPriv = prefixToMask(prefijoPriv);
+        networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+        hostMinPriv = sumarIp(networkPriv, 1);
+        wildcardPriv = maskToWildcard(maskPriv);
+    }
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandosysname = "sysname " + prefijo + "_" + codigoServicio;
+
+   cout << "\033[33m=== COMANDOS DE CONFIGURACION HUAWEI AR651 ===\033[0m" << endl;
+    cout << comandosysname << endl;
+
+    cout << "" << endl;
+    // WAN
+    cout << "interface GigabitEthernet0/0/" << puertoWAN << "." << vlan << endl;
+    cout << " description --WAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << " dot1q termination vid " << vlan << endl;
+cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+ cout << "quit" << endl;
+ cout << "" << endl;
+    cout << "ip route-static 0.0.0.0 0.0.0.0 GigabitEthernet0/0/"<< puertoWAN << "." << vlan
+         << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "" << endl;
+    cout << "acl number 2300" << endl;
+cout << " rule 1 permit source " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+ cout << "" << endl;
+    cout << "interface GigabitEthernet0/0/"<< puertoWAN << endl;
+    cout << " combo-port copper\n undo negotiation auto\n speed 1000\n duplex full\n quit\n" << endl;
+    cout << "" << endl;
+    
+
+    // LAN
+    cout << "interface Vlanif1" << endl;
+    cout << " description --LAN INTERNET --" << codigoServicio << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+     
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        cout << " ip address " << vectorToIp(hostMinPriv) << " " << vectorToIp(maskPriv) << " sub" << endl;
+        cout << " dhcp select global" << endl;
+        cout << "quit" << endl;
+        cout << "" << endl;
+        cout << "nat address-group 1 " << vectorToIp(networkLAN) << " " << vectorToIp(networkLAN) << endl;
+        cout << "" << endl;
+	cout << "acl number 2000" << endl;
+        cout << " rule 1 permit source " << vectorToIp(networkPriv) << " " << vectorToIp(wildcardPriv) << endl;
+        cout << "quit" << endl;        
+        cout << "" << endl;
+        cout << "interface GigabitEthernet0/0/"<< puertoWAN << "." << vlan << endl;
+        cout << " nat outbound 2000 address-group 1" << endl;
+        cout << "quit" << endl;
+        cout << "" << endl;
+        cout << "ip pool DHCP-LAN_privada" << endl;
+        cout << " gateway-list " << vectorToIp(hostMinPriv) << endl;
+        cout << " network " << vectorToIp(networkPriv) << " mask " << vectorToIp(maskPriv) << endl;
+        cout << " dns-list 190.157.8.33 200.14.207.210" << endl;
+    }
+
+    cout << "\033[33m=================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Cisco 867 - SIP FTTx =====
+void configurarCisco867SIP_FTTx() {
+    string nombreCliente, codigoServicio;
+    string ipGestion, ipSIP, mascaraWAN, vlan;
+    string ipLAN, mascaraLAN;
+    int puertoWAN;
+    int puertoLAN;
+    string interfazLAN;
+      
+    cout << "" << endl;
+    cout << "\033[33m=== CONFIGURACION DE ROUTER CISCO 867 - SIP FTTX ===\033[0m" << endl;
+
+    cout << "Nombre del cliente: "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio: "; getline(cin, codigoServicio);
+
+    // Preguntar puerto WAN
+    do {
+        cout << "En que puerto desea configurar su WAN (ej: 1, 2): ";
+        cin >> puertoWAN;
+        cin.ignore();
+    } while(puertoWAN < 1 || puertoWAN > 2);
+
+    // WAN - IP de gestión
+    do {
+        cout << "Direccion IP de gestion (CPE): ";
+        getline(cin, ipGestion);
+    } while (!validarIP(ipGestion));
+
+    // WAN - IP SIP
+    do {
+        cout << "Direccion IP SIP/RTP: ";
+        getline(cin, ipSIP);
+    } while (!validarIP(ipSIP));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN
+    do {
+        cout << "Direccion IP LAN (Planta): ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 24): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // Preguntar el puerto físico con validación (0-4)
+  do {
+    cout << " " << endl;
+    cout << "Del siguiente listado escoja el puerto para conexión de la PLANTA" << endl;
+    cout << " " << endl;
+    cout << "FastEthernet0 = 0" << endl;
+    cout << "FastEthernet1 = 1" << endl;
+    cout << "FastEthernet2 = 2" << endl;
+    cout << "GigaEthernet0 = 3" << endl;
+    cout << "GigaEthernet1 = 4 (Si aplica en el modelo)" << endl;
+    cout << " " << endl;
+    cout << "¿Qué puerto desea para conexión de la PLANTA? (0-4)? ";
+    cin >> puertoLAN;
+    cin.ignore(); // limpiar buffer
+    if (puertoLAN < 0 || puertoLAN > 4) {
+    cout << " " << endl;
+    cout << " " << endl;        
+    cout << "\033[31m== DATO INVALIDO. Ingrese un número entre 0 y 4.==\033[0m" << endl;
+    }
+  } while(puertoLAN < 0 || puertoLAN > 4);
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipGestion);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoHostname = "hostname " + prefijo + "_" + codigoServicio;
+
+    cout << "\n\033[33m=== COMANDOS DE CONFIGURACION CISCO 867 SIP FTTx ===\033[0m" << endl;
+    cout << " " << endl;
+    cout << comandoHostname << endl;
+    cout << " " << endl;
+
+// WAN
+    cout << "interface GigabitEthernet" << puertoWAN << "." << vlan << endl;
+    cout << " description --WAN SIP-" << codigoServicio << "--" << endl;
+    cout << " encapsulation dot1Q " << vlan << endl;
+    cout << " ip address " << ipSIP << " " << vectorToIp(maskWAN) << " secondary" << endl;    
+    cout << " ip address " << ipGestion << " " << vectorToIp(maskWAN) << endl;
+    cout << " ip nat outside" << endl;
+    cout << " ip virtual-reassembly" << endl;
+    cout << "exit" << endl;
+    cout << " " << endl;
+
+    cout << "ip route 0.0.0.0 0.0.0.0 GigabitEthernet" << puertoWAN << "." << vlan << " " << vectorToIp(hostMinWAN) << endl;
+    cout << " " << endl;
+
+    cout << "access-list 23 permit " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << " " << endl;
+
+    // WAN físico
+    cout << "interface GigabitEthernet" << puertoWAN << endl;
+    cout << " no shutdown" << endl;
+    cout << " duplex full" << endl;
+    cout << " speed 1000" << endl;
+    cout << " exit" << endl;
+    cout << " " << endl;
+
+    // LAN
+    cout << "vlan 2" << endl;
+    cout << " name SIP_" << codigoServicio << endl;
+    cout << " exit" << endl;
+    cout << " " << endl;
+
+    cout << "interface Vlan2" << endl;
+    cout << " description --LAN SIP--" << codigoServicio << "--" << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << " ip nat inside" << endl;
+    cout << " ip virtual-reassembly" << endl;
+    cout << " exit" << endl;
+    cout << " " << endl;
+     
+    switch (puertoLAN) {
+    case 0: interfazLAN = "FastEthernet0"; break;
+    case 1: interfazLAN = "FastEthernet1"; break;
+    case 2: interfazLAN = "FastEthernet2"; break;
+    case 3: interfazLAN = "GigabitEthernet0"; break;
+    case 4: interfazLAN = "GigabitEthernet1"; break;
+    default: interfazLAN = "FastEthernet0"; // valor por defecto
+} 
+    cout << "interface " << interfazLAN << endl;
+    cout << " switchport Access vlan 2" << endl;
+    cout << " no shutdown" << endl;
+    cout << " exit" << endl;
+    cout << " " << endl;
+
+    cout << "ip nat inside source static " << vectorToIp(sumarIp(hostMinLAN, 1)) << " " << ipSIP << endl;
+    cout << " " << endl;
+
+    cout << "end" << endl;
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+} 
+
+// ===== Plantilla Cisco 867 - SIP_FTTO =====
+void configurarCisco867SIP_FTTO() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    char opcionDHCP;
+    int puertoWAN;
+    int puertoLAN;
+    string interfazLAN;
+    
+    cout << "=== CONFIGURACION DE ROUTER CISCO 867 SIP_FTTO ===" << endl;
+
+    cout << "Nombre del cliente(MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio(MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // Preguntar puerto WAN
+    do {
+        cout << "En que puerto desea configurar su WAN (ej: 1, 2): ";
+        cin >> puertoWAN;
+        cin.ignore();
+    } while(puertoWAN < 1 || puertoWAN > 2);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+        // LAN
+    do {
+        cout << "Direccion IP LAN (Planta): ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 29-30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // Preguntar el puerto físico con validación (0-4)
+  do {
+    cout << " " << endl;
+    cout << "Del siguiente listado escoja el puerto para conexión de la PLANTA" << endl;
+    cout << " " << endl;
+    cout << "FastEthernet0 = 0" << endl;
+    cout << "FastEthernet1 = 1" << endl;
+    cout << "FastEthernet2 = 2" << endl;
+    cout << "GigaEthernet0 = 3" << endl;
+    cout << "GigaEthernet1 = 4 (Si aplica en el modelo)" << endl;
+    cout << " " << endl;
+    cout << "¿Qué puerto desea para conexión de la PLANTA? (0-4)? ";
+    cin >> puertoLAN;
+    cin.ignore(); // limpiar buffer
+    if (puertoLAN < 0 || puertoLAN > 4) {
+    cout << " " << endl;
+    cout << " " << endl;        
+    cout << "\033[31m== DATO INVALIDO. Ingrese un número entre 0 y 4.==\033[0m" << endl;
+    }
+  } while(puertoLAN < 0 || puertoLAN > 4);
+
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada (si aplica) =====
+    vector<int> ipVecPriv, maskPriv, networkPriv, hostMinPriv, wildcardPriv;
+    int prefijoPriv = 0;
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        prefijoPriv = stoi(mascaraPrivada);
+        ipVecPriv = ipToVector(ipPrivada);
+        maskPriv = prefixToMask(prefijoPriv);
+        networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+        hostMinPriv = sumarIp(networkPriv, 1);
+        wildcardPriv = maskToWildcard(maskPriv);
+    }
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoHostname = "hostname " + prefijo + "_" + codigoServicio;
+
+    cout << "\n \033[33m=== COMANDOS DE CONFIGURACION CISCO 867 SIP_FTTO ===\033[0m" << endl;
+    cout << comandoHostname << endl;
+
+    // WAN
+    cout << "interface GigabitEthernet" << puertoWAN << "." << vlan << endl;
+    cout << " description WAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << " encapsulation dot1Q " << vlan << endl;
+    cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+    cout << "exit" << endl;
+    cout << " " << endl;
+    cout << "ip route 0.0.0.0 0.0.0.0 " << vectorToIp(hostMinWAN) << endl;
+    cout << " " << endl;
+    cout << "access-list 23 permit " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << " " << endl;
+    cout << "interface GigabitEthernet" << puertoWAN << endl;
+    cout << " no shutdown" << endl;
+    cout << " duplex full" << endl;
+    cout << " speed 1000" << endl;
+    cout << "exit" << endl;
+    cout << " " << endl;
+
+    // LAN
+    cout << "Vlan 2" << endl;
+    cout << "name SIP_CENTRALIZADA" << endl;
+    cout << "exit" << endl;
+    cout << " " << endl;
+    cout << "interface Vlan2" << endl;
+    cout << " description -- LAN SIP_" << codigoServicio << "--" << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << " " << endl;
+
+    switch (puertoLAN) {
+    case 0: interfazLAN = "FastEthernet0"; break;
+    case 1: interfazLAN = "FastEthernet1"; break;
+    case 2: interfazLAN = "FastEthernet2"; break;
+    case 3: interfazLAN = "GigabitEthernet0"; break;
+    case 4: interfazLAN = "GigabitEthernet1"; break;
+    default: interfazLAN = "FastEthernet0"; // valor por defecto
+} 
+    cout << "interface " << interfazLAN << endl;
+    cout << " description --- CONEXION PLANTA CLIENTE ---" << endl;
+    cout << "switchport access vlan 2" << endl;
+    cout << "exit" << endl;
+    cout << " " << endl;
+    
+    cout << "ip route 10.11.0.0 255.255.255.240 GigabitEthernet"<< puertoWAN << "." << vlan << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "ip route 10.11.200.0 255.255.255.240 GigabitEthernet"<< puertoWAN << "." << vlan << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "ip route 10.11.250.0 255.255.255.192 GigabitEthernet"<< puertoWAN << "." << vlan << " " << vectorToIp(hostMinWAN) << endl; 
+    cout << "ip route 10.11.255.0 255.255.255.0 GigabitEthernet"<< puertoWAN << "." << vlan << " " << vectorToIp(hostMinWAN) << endl;    
+    cout << " " << endl;
+    cout << "ip access-list extended CONTROL-IMS" << endl;
+    cout << "permit ip  " << vectorToIp(networkLAN) << " 0.0.0.3 10.11.0.0 0.0.0.15" << endl;
+    cout << "permit ip  " << vectorToIp(networkLAN) << " 0.0.0.3 10.11.200.0 0.0.0.15" << endl;
+    cout << "permit ip  " << vectorToIp(networkLAN) << " 0.0.0.3 10.11.250.0 0.0.0.255" << endl;
+    cout << "permit ip  " << vectorToIp(networkLAN) << " 0.0.0.3 10.11.255.0 0.0.0.255" << endl;
+           
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+
+// ===== Plantilla Mikrotik RB750 - Internet =====
+void configurarMikrotikRB750Internet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, vlan;
+    string ipLAN, mascaraLAN;
+    string ipPrivada, mascaraPrivada;
+
+    cout << "=== Configuracion de Router Mikrotik RB750 - Internet ===" << endl;
+
+    cout << "Nombre del cliente: "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio: "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN
+    do {
+        cout << "Direccion IP LAN: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 30 0 29): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // Privada
+    do {
+        cout << "Direccion IP Privada: ";
+        getline(cin, ipPrivada);
+    } while (!validarIP(ipPrivada));
+
+    cout << "Mascara Privada (ej: 24): ";
+    getline(cin, mascaraPrivada);
+    int prefijoPriv = stoi(mascaraPrivada);
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada =====
+    vector<int> ipVecPriv = ipToVector(ipPrivada);
+    vector<int> maskPriv = prefixToMask(prefijoPriv);
+    vector<int> networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+    vector<int> hostMinPriv = sumarIp(networkPriv, 1);
+    vector<int> hostMaxPriv = calcularBroadcast(ipVecPriv, maskPriv);
+
+ // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoHostname = "/system identity set name=" + prefijo + "_" + codigoServicio;
+
+    cout << "\n\033[33m=== Comandos de Configuracion Mikrotik RB750 Internet ===\033[0m" << endl;
+    cout << "\n\033[95m=== Para la Configuracion conectese al LAN 2 del Mikrotik RB750 ===\033[0m" << endl;
+
+        cout << "\n\033[33m=== Configuracion WAN ===\033[0m" << endl;
+
+    cout << "/interface vlan" << endl;
+    cout << "add comment=---WAN_INTERNET-" << codigoServicio << "--- interface=ether1 name=vlan" << vlan << " vlan-id=" << vlan << endl;
+
+    cout << "/ip address" << endl;
+    cout << "add address=" << ipParaConfigWAN << "/" << prefijoWAN << " interface=vlan" << vlan << " network=" << vectorToIp(networkWAN) << endl;
+
+    cout << "/ip route" << endl;
+    cout << "add distance=1 gateway=" << vectorToIp(hostMinWAN) << endl;
+    cout << " " << endl;
+    cout << "/ip/firewall/filter> remove" << endl;
+    cout << "6" << endl;
+    cout << " " << endl;
+
+
+cout << "\n\033[94m=== VALIDAR ULTIMA MILLA Y ACCESO REMOTO ===\033[0m" << endl;
+cout << " " << endl;
+cout << "\n\033[33m=== Configuracion LAN Y DHCP ===\033[0m" << endl;
+
+    cout << "/interface bridge" << endl;
+    cout << "add name=bridge_LAN" << endl;
+    cout << " " << endl;
+
+    cout << "/interface bridge port" << endl;
+    cout << "remove" << endl;    
+    cout << "1" << endl;
+    cout << "remove" << endl;    
+    cout << "2" << endl;
+    cout << "remove" << endl;    
+    cout << "3" << endl;
+
+    cout << "/ip address" << endl;
+    cout << "add address=" << vectorToIp(hostMinLAN) << "/" << prefijoLAN << " interface=bridge_LAN network=" << vectorToIp(networkLAN) << endl;
+    cout << "add address=" << vectorToIp(hostMinPriv) << "/" << prefijoPriv << " interface=bridge_LAN network=" << vectorToIp(networkPriv) << endl;
+   
+    cout << " " << endl;
+    cout << "/interface bridge port" << endl;
+    cout << "add bridge=bridge_LAN interface=ether3 " << endl;	
+    cout << "add bridge=bridge_LAN interface=ether4 " << endl;
+    cout << "add bridge=bridge_LAN interface=ether5 " << endl;
+    cout << " " << endl;
+
+    cout << "/interface ethernet" << endl;
+    cout << "set [ find default-name=ether1 ] comment=\"---WAN INTERNET - " << codigoServicio << " ---\" auto-negotiation=yes" << endl;
+    cout << "set [ find default-name=ether2 ] comment=\"---LAN INTERNET ----\" auto-negotiation=yes" << endl;
+    cout << "set [ find default-name=ether3 ] comment=\"---LAN INTERNET ----\" auto-negotiation=yes" << endl;
+    cout << "set [ find default-name=ether4 ] comment=\"---LAN INTERNET ----\" auto-negotiation=yes" << endl;
+    cout << "set [ find default-name=ether5 ] comment=\"---LAN INTERNET ----\" auto-negotiation=yes" << endl;
+    cout << " " << endl;
+
+
+    cout << "/ip pool" << endl;
+    cout << "add name=dhcp_pool1 ranges=" << vectorToIp(sumarIp(hostMinPriv, 1)) << "-" << vectorToIp(sumarIp(hostMaxPriv, -1)) << endl;
+    cout << " " << endl;
+
+    cout << "/ip dhcp-server" << endl;
+    cout << "add address-pool=dhcp_pool1 disabled=no interface=bridge_LAN name=dhcp1" << endl;
+    cout << " " << endl;
+
+    cout << "/ip dhcp-server network" << endl;
+    cout << "add address=" << vectorToIp(networkPriv) << "/" << prefijoPriv << " dns-server=190.157.8.33,200.14.207.10 gateway=" << vectorToIp(hostMinPriv) << endl;
+    cout << " " << endl;
+
+    cout << "/ip dns" << endl;
+    cout << "set allow-remote-requests=yes servers=8.8.8.8" << endl;
+
+    cout << "/ip firewall nat" << endl;
+    cout << "add action=src-nat chain=srcnat dst-address=0.0.0.0/0 out-interface=vlan" << vlan
+         << " src-address=" << vectorToIp(networkPriv) << "/" << prefijoPriv
+         << " to-addresses=" << vectorToIp(networkLAN) << "/" << prefijoLAN << endl;
+
+    cout << comandoHostname << endl;
+
+    cout << "/user" << endl;
+    cout << "add name=\"telmexuser\" group=full password=\"Telmex_Col\"" << endl;
+    cout << "remove admin" << endl;
+    cout << " " << endl;
+
+    cout << "\n\033[95m=== VALIDAR DHCP PUERTO LAN 3, 4 o 5, SI FUNCIONA VALIDE ACCESO Y COMPLETE LOS SIGUIENTES COMANDOS, SINO VUELVA AL PUERTO 2===\033[0m" << endl;
+    
+    cout << " " << endl;
+    cout << "/interface bridge port" << endl;
+    cout << "remove" << endl;
+    cout << "0" << endl;
+    cout << " " << endl;
+    cout << "/interface bridge port" << endl;
+    cout << "add bridge=bridge_LAN interface=ether2 " << endl;
+
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Mikrotik RB750 - MPLS_BGP =====
+void configurarMikrotikRB750MPLS_BGP() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, vlan;
+    string ipLAN, mascaraLAN;
+    string ipPrivada, mascaraPrivada;
+    string asBGP;
+
+    cout << "=== Configuracion de Router Mikrotik RB750 - MPLS_BGP ===" << endl;
+
+    cout << "Nombre del cliente: "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio: "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "\033[31m== DATO INVALIDO. Ingrese nuevamente.==\033[0m" << endl;
+
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // AS del BGP
+    cout << "AS del BGP (asignado por el PEM): ";
+    getline(cin, asBGP);
+
+    // LAN
+    do {
+        cout << "Direccion IP LAN (Publica): ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 30 0 29): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // Privada
+    do {
+        cout << "Direccion IP Privada: ";
+        getline(cin, ipPrivada);
+    } while (!validarIP(ipPrivada));
+
+    cout << "Mascara Privada (ej: 24): ";
+    getline(cin, mascaraPrivada);
+    int prefijoPriv = stoi(mascaraPrivada);
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada =====
+    vector<int> ipVecPriv = ipToVector(ipPrivada);
+    vector<int> maskPriv = prefixToMask(prefijoPriv);
+    vector<int> networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+    vector<int> hostMinPriv = sumarIp(networkPriv, 1);
+    vector<int> hostMaxPriv = calcularBroadcast(ipVecPriv, maskPriv);
+
+ // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoHostname = "/system identity set name=" + prefijo + "_" + codigoServicio;
+
+    cout << "\n\033[33m=== Comandos de Configuracion Mikrotik RB750 MPLS_BGP ===\033[0m" << endl;
+    cout << " " << endl;
+    cout << "\n\033[95m=== Para la Configuracion conectese al LAN 2 del Mikrotik ===\033[0m" << endl;
+    cout << " " << endl;
+    cout << "\n\033[33m=== Configuracion WAN ===\033[0m" << endl;
+
+    cout << "/interface vlan" << endl;
+    cout << "add comment=---WAN_MPLS-" << codigoServicio << "--- interface=ether1 name=vlan" << vlan << " vlan-id=" << vlan << endl;
+
+    cout << "/ip address" << endl;
+    cout << "add address=" << ipParaConfigWAN << "/" << prefijoWAN << " interface=vlan" << vlan << " network=" << vectorToIp(networkWAN) << endl;
+    cout << " " << endl;
+    
+    cout << "/routing bgp template" << endl;
+    cout << "add as=" << asBGP << " name=MPLS_BGP output.redistribute=connected,static router-id= " << vectorToIp(sumarIp(hostMinWAN, 1)) << endl; 
+    cout << "set MPLS_BGP output.redistribute=connected,static" << endl;
+    cout << " " << endl;
+    cout << "/routing bgp connection" << endl;     
+    cout << "add local.role=ebgp name=BGP_PEER remote.address=" << vectorToIp(hostMinWAN) << "remote.as=14080 templates=MPLS_BGP" << endl;
+    cout << " " << endl;
+    cout << "/ip route" << endl;   
+    cout << "add dst-address=" << vectorToIp(networkWAN) << "/" << prefijoWAN << " gateway=" << vectorToIp(hostMinWAN) << endl;
+ 
+    cout << "VALDACION OJO " << endl;
+    cout << "add name=MPLS_BGP as=" << asBGP << " router-id=" << vectorToIp(sumarIp(hostMinWAN, 1)) << endl;
+   cout << " " << endl; 
+   cout << "/routing bgp connection" << endl;
+   cout << "add name=BGP_PEER remote.address=" << vectorToIp(hostMinWAN) << " remote.as=14080 local.role=ebgp templates=default" << endl;
+   cout << "/routing bgp network" << endl;
+   cout << "add network=" << vectorToIp(networkWAN) << "/" << prefijoWAN  << endl;
+   cout << "add network=" << vectorToIp(networkLAN) << "/" << prefijoLAN  << endl;
+   
+    cout << "/ip/firewall/filter> remove" << endl;
+    cout << "6" << endl;
+    cout << " " << endl;
+    cout << " " << endl;
+
+cout << "\n\033[94m=== VALIDAR ULTIMA MILLA Y ACCESO REMOTO ===\033[0m" << endl;
+cout << " " << endl;
+cout << "\n\033[33m=== Configuracion LAN Y DHCP ===\033[0m" << endl;
+
+    cout << "/interface bridge" << endl;
+    cout << "add name=bridge_LAN" << endl;
+    cout << " " << endl;
+
+    cout << "/interface bridge port" << endl;
+    cout << "remove" << endl;    
+    cout << "1" << endl;
+    cout << "remove" << endl;    
+    cout << "2" << endl;
+    cout << "remove" << endl;    
+    cout << "3" << endl;
+
+    cout << "/ip address" << endl;
+    cout << "add address=" << vectorToIp(hostMinLAN) << "/" << prefijoLAN << " interface=bridge_LAN network=" << vectorToIp(networkLAN) << endl;
+    cout << "add address=" << vectorToIp(hostMinPriv) << "/" << prefijoPriv << " interface=bridge_LAN network=" << vectorToIp(networkPriv) << endl;
+   
+    cout << " " << endl;
+    cout << "/interface bridge port" << endl;
+    cout << "add bridge=bridge_LAN interface=ether3 " << endl;	
+    cout << "add bridge=bridge_LAN interface=ether4 " << endl;
+    cout << "add bridge=bridge_LAN interface=ether5 " << endl;
+    cout << " " << endl;
+
+    cout << "/interface ethernet" << endl;
+    cout << "set [ find default-name=ether1 ] comment=\"---WAN INTERNET - " << codigoServicio << " ---\" auto-negotiation=yes" << endl;
+    cout << "set [ find default-name=ether2 ] comment=\"---LAN INTERNET ----\" auto-negotiation=yes" << endl;
+    cout << "set [ find default-name=ether3 ] comment=\"---LAN INTERNET ----\" auto-negotiation=yes" << endl;
+    cout << "set [ find default-name=ether4 ] comment=\"---LAN INTERNET ----\" auto-negotiation=yes" << endl;
+    cout << "set [ find default-name=ether5 ] comment=\"---LAN INTERNET ----\" auto-negotiation=yes" << endl;
+    cout << " " << endl;
+
+
+    cout << "/ip pool" << endl;
+    cout << "add name=dhcp_pool1 ranges=" << vectorToIp(sumarIp(hostMinPriv, 1)) << "-" << vectorToIp(sumarIp(hostMaxPriv, -1)) << endl;
+    cout << " " << endl;
+
+    cout << "/ip dhcp-server" << endl;
+    cout << "add address-pool=dhcp_pool1 disabled=no interface=bridge_LAN name=dhcp1" << endl;
+    cout << " " << endl;
+
+    cout << "/ip dhcp-server network" << endl;
+    cout << "add address=" << vectorToIp(networkPriv) << "/" << prefijoPriv << " dns-server=190.157.8.33,200.14.207.10 gateway=" << vectorToIp(hostMinPriv) << endl;
+    cout << " " << endl;
+
+    cout << "/ip dns" << endl;
+    cout << "set allow-remote-requests=yes servers=8.8.8.8" << endl;
+
+    cout << "/ip firewall nat" << endl;
+    cout << "add action=src-nat chain=srcnat dst-address=0.0.0.0/0 out-interface=vlan" << vlan
+         << " src-address=" << vectorToIp(networkPriv) << "/" << prefijoPriv
+         << " to-addresses=" << vectorToIp(networkLAN) << "/" << prefijoLAN << endl;
+
+    cout << comandoHostname << endl;
+
+    cout << "/user" << endl;
+    cout << "add name=\"telmexuser\" group=full password=\"Telmex_Col\"" << endl;
+    cout << "remove admin" << endl;
+    cout << " " << endl;
+
+    cout << "\n\033[95m=== VALIDAR DHCP PUERTO LAN 3, 4 o 5 Y NAVEGACION ===\033[0m" << endl;
+    cout << "\n\033[95m=== SI FUNCIONA VALIDE ACCESO Y COMPLETE LOS SIGUIENTES COMANDOS, SINO VUELVA AL PUERTO 2 ===\033[0m" << endl;
+     
+    cout << " " << endl;
+    cout << "/interface bridge port" << endl;
+    cout << "remove" << endl;
+    cout << "0" << endl;
+    cout << " " << endl;
+    cout << "/interface bridge port" << endl;
+    cout << "add bridge=bridge_LAN interface=ether2 " << endl;
+
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+
+// ===== Plantilla Mikrotik RB750 - SIP_FTTO =====
+void configurarMikrotikRB750SIP_FTTO() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, vlan;
+    string ipLAN, mascaraLAN;
+    string ipPrivada, mascaraPrivada;
+    string Ethernet;
+    int puerto;
+
+    cout << "=== Configuracion de Router Mikrotik RB750 - SIP_FTTO ===" << endl;
+
+    cout << "Nombre del cliente: "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio: "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN
+    do {
+        cout << "Direccion IP LAN (Loopback): ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (Loopback) (ej: 30 0 29): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+   // Puerto Ethernet SIP
+    
+    do {
+        cout << "Puerto Ethernet conexion SIP (ej: 2, 3, 4 o 5): ";
+        getline(cin, Ethernet);
+
+        try {
+            puerto = stoi(Ethernet); // convertir a número
+        } catch (...) {
+            puerto = -1; // valor inválido
+        }
+
+        if (puerto < 2 || puerto > 5) {
+            cout << "Dato errado, vuelva a intentarlo." << endl;
+        }
+
+    } while (puerto < 2 || puerto > 5);
+
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    
+ // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoHostname = "/system identity set name=" + prefijo + "_" + codigoServicio;
+
+    cout << "\n\033[33m=== Comandos de Configuracion Mikrotik RB750 SIP FTTO ===\033[0m" << endl;
+    
+        cout << "\n\033[33m=== Configuracion WAN ===\033[0m" << endl;
+
+    cout << "/interface vlan" << endl;
+    cout << "add comment=---WAN_SIP--" << codigoServicio << "--- interface=ether1 name=vlan" << vlan << " vlan-id=" << vlan << endl;
+    cout << " " << endl;
+    cout << "/ip address" << endl;
+    cout << "add address=" << ipParaConfigWAN << "/" << prefijoWAN << " interface=vlan" << vlan << " network=" << vectorToIp(networkWAN) << endl;
+    cout << " " << endl;
+    cout << "/ip route" << endl;
+    cout << "add dst-address=10.11.0.0/28 gateway=" << vectorToIp(hostMinWAN) << endl;
+    cout << "add dst-address=10.11.200.0/28 gateway=" << vectorToIp(hostMinWAN) << endl;
+    cout << "add dst-address=10.11.250.0/26 gateway=" << vectorToIp(hostMinWAN) << endl;
+    cout << "add dst-address=10.11.255.0/24 gateway=" << vectorToIp(hostMinWAN) << endl;
+    cout << " " << endl;
+    
+    cout << "\n\033[33m=== Configuracion LAN (LOOPBACK) ===\033[0m" << endl;
+
+    cout << "/ip address" << endl;
+    cout << "add address=" << vectorToIp(hostMinLAN) << "/" << prefijoLAN << " interface=ether"<< puerto <<" network=" << vectorToIp(networkLAN) << endl;
+    cout << " " << endl;
+
+    cout << "/ip firewall address-list" << endl;
+    cout << "/add address=" << vectorToIp(networkLAN) << "/" << prefijoLAN << " list=ORIGEN_CONTROL_IMS" << endl;
+    cout << "/add address=10.11.0.0/28 list=DESTINOS_IMS" << endl;
+    cout << "/add address=10.11.200.0/28 list=DESTINOS_IMS" << endl;
+    cout << "/add address=10.11.250.0/26 list=DESTINOS_IMS" << endl;
+    cout << "/add address=10.11.255.0/24 list=DESTINOS_IMS" << endl;
+    
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Huawei AR1220 - Internet =====
+void configurarHuaweiAR1220Internet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    char opcionDHCP;
+
+    cout << "=== Configuracion de Router Huawei AR1220 ===" << endl;
+
+    cout << "Nombre del cliente (MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio(MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN pública
+    do {
+        cout << "Direccion IP LAN publica: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 29 o 30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    cout << "Desea habilitar DHCP? (s/n): ";
+    cin >> opcionDHCP;
+    cin.ignore();
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        do {
+            cout << "Direccionamiento privado (ej: 192.168.1.0): ";
+            getline(cin, ipPrivada);
+        } while (!validarIP(ipPrivada));
+        cout << "Mascara direccionamiento privado (por defecto 24): ";
+        getline(cin, mascaraPrivada);
+        if (mascaraPrivada.empty()) mascaraPrivada = "24";
+    }
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada (si aplica) =====
+    vector<int> ipVecPriv, maskPriv, networkPriv, hostMinPriv, wildcardPriv;
+    int prefijoPriv = 0;
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        prefijoPriv = stoi(mascaraPrivada);
+        ipVecPriv = ipToVector(ipPrivada);
+        maskPriv = prefixToMask(prefijoPriv);
+        networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+        hostMinPriv = sumarIp(networkPriv, 1);
+        wildcardPriv = maskToWildcard(maskPriv);
+    }
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandosysname = "sysname " + prefijo + "_" + codigoServicio;
+
+
+   cout << "\033[33m=== COMANDOS DE CONFIGURACION HUAWEI AR1220 ===\033[0m" << endl;
+    cout << comandosysname << endl;
+
+    cout << "" << endl;
+    // WAN
+    cout << "interface GigabitEthernet0/0/8." << vlan << endl;
+    cout << " description --WAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << " dot1q termination vid " << vlan << endl;
+cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+ cout << "quit" << endl;
+ cout << "" << endl;
+    cout << "ip route-static 0.0.0.0 0.0.0.0 GigabitEthernet0/0/8." << vlan
+         << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "" << endl;
+    cout << "acl number 2300" << endl;
+    cout << " rule 1 permit source " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << "quit" << endl; 
+    cout << "" << endl;
+    cout << "interface GigabitEthernet0/0/8" << endl;
+    cout << " undo negotiation auto\n speed 1000\n duplex full\n quit\n" << endl;
+    cout << "" << endl;
+   
+    // LAN
+    cout << "interface Vlanif1" << endl;
+    cout << " description --LAN INTERNET --" << codigoServicio << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+     
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        cout << " ip address " << vectorToIp(hostMinPriv) << " " << vectorToIp(maskPriv) << " sub" << endl;
+        cout << " dhcp select global" << endl;
+        cout << "quit" << endl;
+        cout << "" << endl;
+        cout << "acl number 2000" << endl;
+        cout << " rule 1 permit source " << vectorToIp(networkPriv) << " " << vectorToIp(wildcardPriv) << endl;
+        cout << endl;
+        cout << "quit" << endl;
+        cout << "interface GigabitEthernet0/0/8." << vlan << endl;
+        cout << " nat outbound 2000 address-group 1" << endl;
+        cout << "quit" << endl;
+        cout << "" << endl;
+        cout << "ip pool DHCP-LAN_privada" << endl;
+        cout << " gateway-list " << vectorToIp(hostMinPriv) << endl;
+        cout << " network " << vectorToIp(networkPriv) << " mask " << vectorToIp(maskPriv) << endl;
+        cout << " dns-list 190.157.8.33 200.14.207.210" << endl;
+    }
+
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+// ===== Plantilla Huawei AR161 - Internet =====
+void configurarHuaweiAR161Internet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    char opcionDHCP;
+
+    cout << "=== Configuracion de Router Huawei AR161 ===" << endl;
+
+    cout << "Nombre del cliente (MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio (MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (ej: 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN
+    do {
+        cout << "Direccion IP LAN: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 24): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    cout << "Desea habilitar DHCP? (s/n): ";
+    cin >> opcionDHCP;
+    cin.ignore();
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        do {
+            cout << "Direccionamiento privado (ej: 192.168.1.0): ";
+            getline(cin, ipPrivada);
+        } while (!validarIP(ipPrivada));
+        cout << "Mascara direccionamiento privado (por defecto 24): ";
+        getline(cin, mascaraPrivada);
+        if (mascaraPrivada.empty()) mascaraPrivada = "24";
+    }
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada (si aplica) =====
+    vector<int> ipVecPriv, maskPriv, networkPriv, hostMinPriv, wildcardPriv;
+    int prefijoPriv = 0;
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        prefijoPriv = stoi(mascaraPrivada);
+        ipVecPriv = ipToVector(ipPrivada);
+        maskPriv = prefixToMask(prefijoPriv);
+        networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+        hostMinPriv = sumarIp(networkPriv, 1);
+        wildcardPriv = maskToWildcard(maskPriv);
+    }
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandosysname = "sysname " + prefijo + "_" + codigoServicio;
+
+    cout << "\033[33m=== COMANDOS DE CONFIGURACION HUAWEI AR161 ===\033[0m" << endl;
+    cout << comandosysname << endl << endl;
+
+    // WAN
+    cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+    cout << " description --WAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << " dot1q termination vid " << vlan << endl;
+    cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+    cout << "quit" << endl << endl;
+
+    cout << "ip route-static 0.0.0.0 0.0.0.0 GigabitEthernet0/0/4." << vlan
+         << " " << vectorToIp(hostMinWAN) << endl << endl;
+
+    cout << "acl number 2300" << endl;
+    cout << " rule 1 permit source " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl << endl;
+    cout << "quit" << endl << endl;
+    cout << "interface GigabitEthernet0/0/4" << endl;
+    cout << " undo negotiation auto\n speed 1000\n duplex full\n quit\n" << endl;
+    cout << "" << endl;
+
+    // LAN
+    cout << "interface Vlanif1" << endl;
+    cout << " description --LAN INTERNET --" << codigoServicio << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        cout << " ip address " << vectorToIp(hostMinPriv) << " " << vectorToIp(maskPriv) << " sub" << endl;
+        cout << " dhcp select global" << endl;
+        cout << "quit" << endl << endl;
+
+        cout << " nat address-group 1 "
+             << vectorToIp(networkLAN) << " "
+             << vectorToIp(networkLAN) << endl;
+
+        cout << "acl number 2000" << endl;
+        cout << " rule 1 permit source " << vectorToIp(networkPriv) << " " << vectorToIp(wildcardPriv) << endl << endl;
+
+        cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+        cout << " nat outbound 2000 address-group 1" << endl;
+        cout << "quit" << endl << endl;
+
+        cout << "ip pool DHCP-LAN_privada" << endl;
+        cout << " gateway-list " << vectorToIp(hostMinPriv) << endl;
+        cout << " network " << vectorToIp(networkPriv) << " mask " << vectorToIp(maskPriv) << endl;
+        cout << " dns-list 190.157.8.33 200.14.207.210" << endl;
+	
+    }
+
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Huawei AR611 - Internet =====
+void configurarHuaweiAR611Internet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN, vlan;
+    string ipPrivada, mascaraPrivada;
+    char opcionDHCP;
+
+    cout << "=== Configuracion de Router Huawei 611 ===" << endl;
+
+    cout << "Nombre del cliente (MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio(MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN pública
+    do {
+        cout << "Direccion IP LAN publica: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 29 o 30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    cout << "Desea habilitar DHCP? (s/n): ";
+    cin >> opcionDHCP;
+    cin.ignore();
+
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        do {
+            cout << "Direccionamiento privado (ej: 192.168.1.0): ";
+            getline(cin, ipPrivada);
+        } while (!validarIP(ipPrivada));
+        cout << "Mascara direccionamiento privado (por defecto 24): ";
+        getline(cin, mascaraPrivada);
+        if (mascaraPrivada.empty()) mascaraPrivada = "24";
+    }
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Calculadora Privada (si aplica) =====
+    vector<int> ipVecPriv, maskPriv, networkPriv, hostMinPriv, wildcardPriv;
+    int prefijoPriv = 0;
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        prefijoPriv = stoi(mascaraPrivada);
+        ipVecPriv = ipToVector(ipPrivada);
+        maskPriv = prefixToMask(prefijoPriv);
+        networkPriv = calcularNetwork(ipVecPriv, maskPriv);
+        hostMinPriv = sumarIp(networkPriv, 1);
+        wildcardPriv = maskToWildcard(maskPriv);
+    }
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandosysname = "sysname " + prefijo + "_" + codigoServicio;
+
+   cout << "\033[33m=== COMANDOS DE CONFIGURACION HUAWEI 611 ===\033[0m" << endl;
+    cout << comandosysname << endl;
+
+    cout << "" << endl;
+    // WAN
+    cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+    cout << " description --WAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << " dot1q termination vid " << vlan << endl;
+cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+ cout << "quit" << endl;
+ cout << "" << endl;
+    cout << "ip route-static 0.0.0.0 0.0.0.0 GigabitEthernet0/0/4." << vlan
+         << " " << vectorToIp(hostMinWAN) << endl;
+    cout << "" << endl;
+    cout << "acl number 2300" << endl;
+cout << " rule 1 permit source " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+ cout << "" << endl;
+    cout << "interface GigabitEthernet0/0/4" << endl;
+    cout << " combo-port copper\n undo negotiation auto\n speed 1000\n duplex full\n quit\n" << endl;
+    cout << "" << endl;
+    
+
+    // LAN
+    cout << "interface Vlanif1" << endl;
+    cout << " description --LAN INTERNET --" << codigoServicio << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+     
+    if (opcionDHCP=='s' || opcionDHCP=='S') {
+        cout << " ip address " << vectorToIp(hostMinPriv) << " " << vectorToIp(maskPriv) << " sub" << endl;
+        cout << " dhcp select global" << endl;
+        cout << "quit" << endl;
+        cout << "" << endl;
+        cout << "nat address-group 1 " << vectorToIp(networkLAN) << " " << vectorToIp(networkLAN) << endl;
+        cout << "" << endl;
+	cout << "acl number 2000" << endl;
+        cout << " rule 1 permit source " << vectorToIp(networkPriv) << " " << vectorToIp(wildcardPriv) << endl;
+        cout << "quit" << endl;        
+        cout << "" << endl;
+        cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+        cout << " nat outbound 2000 address-group 1" << endl;
+        cout << "quit" << endl;
+        cout << "" << endl;
+        cout << "ip pool DHCP-LAN_privada" << endl;
+        cout << " gateway-list " << vectorToIp(hostMinPriv) << endl;
+        cout << " network " << vectorToIp(networkPriv) << " mask " << vectorToIp(maskPriv) << endl;
+        cout << " dns-list 190.157.8.33 200.14.207.210" << endl;
+    }
+
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Huawei AR611 - MPLS con BGP =====
+void configurarHuaweiAR611MPLS_BGP() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, vlan;
+    string ipLAN, mascaraLAN;
+    string asBGP; // Sistema Autónomo del BGP
+
+    cout << "=== Configuracion de Router Huawei AR611 - MPLS con BGP ===" << endl;
+
+    cout << "Nombre del cliente: "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio: "; getline(cin, codigoServicio);
+
+    // WAN
+    do {
+        cout << "Direccion IP WAN: ";
+        getline(cin, ipWAN);
+    } while (!validarIP(ipWAN));
+
+    int prefijoWAN = 0;
+    while (true) {
+        cout << "Mascara WAN (aceptado: 21-24 o 30): ";
+        getline(cin, mascaraWAN);
+        try { prefijoWAN = stoi(mascaraWAN); } catch (...) { prefijoWAN = 0; }
+        if (prefijoWAN == 30 || (prefijoWAN >= 21 && prefijoWAN <= 24)) break;
+        else cout << "Dato invalido. Ingrese nuevamente." << endl;
+    }
+
+    do {
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+    } while (!validarVLAN(vlan));
+
+    // LAN
+    do {
+        cout << "Direccion IP LAN: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 24): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // AS del BGP
+    cout << "AS del BGP (asignado por el PEM): ";
+    getline(cin, asBGP);
+
+    // ===== Calculadora WAN =====
+    vector<int> ipVecWAN = ipToVector(ipWAN);
+    vector<int> maskWAN = prefixToMask(prefijoWAN);
+    vector<int> wildcardWAN = maskToWildcard(maskWAN);
+    vector<int> networkWAN = calcularNetwork(ipVecWAN, maskWAN);
+    vector<int> broadcastWAN = calcularBroadcast(ipVecWAN, maskWAN);
+    vector<int> hostMinWAN = sumarIp(networkWAN, 1);
+    vector<int> hostMaxWAN = sumarIp(broadcastWAN, -1);
+    string ipParaConfigWAN = (prefijoWAN == 30) ? vectorToIp(hostMaxWAN) : ipWAN;
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandoSysname = "Sysname " + prefijo + "_" + codigoServicio;
+
+    cout << "\n\033[33m=== Comandos de Configuracion Huawei AR611 MPLS con BGP ===\033[0m" << endl;
+    cout << comandoSysname << endl;
+    cout << "!" << endl;
+
+    // WAN físico
+    cout << "interface GigabitEthernet0/0/4" << endl;
+    cout << " combo-port copper" << endl;
+    cout << " undo negotiation auto" << endl;
+    cout << " speed 1000" << endl;
+    cout << " duplex full" << endl;
+    cout << " quit" << endl;
+    cout << "" << endl;
+
+    // WAN subinterface
+    cout << "interface GigabitEthernet0/0/4." << vlan << endl;
+    cout << " description --WAN-MPLS-" << codigoServicio << "--" << endl;
+    cout << " dot1q termination vid " << vlan << endl;
+    cout << " ip address " << ipParaConfigWAN << " " << vectorToIp(maskWAN) << endl;
+    cout << " quit" << endl;
+    cout << "" << endl;
+
+    // BGP
+    cout << "bgp " << asBGP << endl;
+    cout << " peer " << vectorToIp(hostMinWAN) << " as-number 14080" << endl;
+    cout << " peer " << vectorToIp(hostMinWAN) << " description WAN--CLARO-" << codigoServicio << "--" << endl;
+    cout << " peer " << vectorToIp(hostMinWAN) << " timer 10 30" << endl;
+    cout << " ipv4-family unicast" << endl;
+    cout << "  network " << vectorToIp(networkLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << "  peer " << vectorToIp(hostMinWAN) << " enable" << endl;
+    cout << " quit" << endl;
+    cout << "" << endl;
+
+    // ACL
+    cout << "acl number 2300" << endl;
+    cout << " rule 10 permit source " << vectorToIp(networkWAN) << " " << vectorToIp(wildcardWAN) << endl;
+    cout << "!" << endl;
+
+    // LAN
+    cout << "interface Vlanif1" << endl;
+    cout << " description --LAN-MPLS-" << codigoServicio << "--" << endl;
+    cout << " ip address " << vectorToIp(hostMinLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << " quit" << endl;
+    cout << "!" << endl;
+
+    cout << "return" << endl;
+    cout << "" << endl;    
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Demarcador RAX711 - Internet =====
+void configurarDemarcadorRAX711Internet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN;
+    vector<string> vlans;
+    char opcionMasVlan;
+
+    // Variables para interfaces
+    int nniSeleccionada, uniSeleccionada;
+
+    cout << "=== Configuracion Demarcador RAX711 - Internet ===" << endl;
+
+    // Datos básicos
+    cout << "Nombre del cliente (MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio (MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // Preguntar interfaces ANTES de generar comandos
+    do {
+        cout << "Número de interface NNI para la WAN (1-2): ";
+        cin >> nniSeleccionada;
+        cin.ignore();
+    } while(nniSeleccionada < 1 || nniSeleccionada > 2);
+
+    do {
+        cout << "Número de interface UNI para la LAN (1-4): ";
+        cin >> uniSeleccionada;
+        cin.ignore();
+    } while(uniSeleccionada < 1 || uniSeleccionada > 4);
+
+    // WAN - pedir VLANs
+    do {
+        string vlan;
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+        vlans.push_back(vlan);
+
+        cout << "¿Desea añadir otra VLAN? (s/n): ";
+        cin >> opcionMasVlan;
+        cin.ignore();
+    } while(opcionMasVlan == 's' || opcionMasVlan == 'S');
+
+    // Mostrar VLANs ingresadas
+    cout << "\n=== VLANs ingresadas ===" << endl;
+    for(size_t i = 0; i < vlans.size(); i++) {
+        cout << "VLAN " << (i+1) << ": " << vlans[i] << endl;
+    }
+
+    // LAN pública
+    do {
+        cout << "Direccion IP Gestion Demarcador: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+    vector<int> ipUsableLAN = sumarIp(networkLAN, 2); // hostMin +1
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandohostname = "hostname " + prefijo + "_" + codigoServicio;
+
+    cout << "\033[33m=== COMANDOS DE CONFIGURACION DEMARCADOR RAX711 ===\033[0m" << endl;
+    cout << comandohostname << endl;
+    cout << endl;
+
+    // WAN
+    cout << "config terminal" << endl;
+    cout << "create vlan 2-4094 active" << endl;
+    cout << "interface nni " << nniSeleccionada << endl;
+    cout << " description --WAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << "switchport mode trunk" << endl;
+    cout << "switchport trunk allowed vlan 789";
+    for(size_t i = 0; i < vlans.size(); i++) {
+        cout << "," << vlans[i];
+    }
+    cout << endl;
+    cout << "no shutdown" << endl;
+    cout << "speed 1000" << endl;
+    cout << "duplex full" << endl;
+    cout << " exit" << endl;
+    cout << endl;
+
+    // LAN
+    cout << "interface uni " << uniSeleccionada << endl;
+    cout << " description --LAN INTERNET --" << codigoServicio << "--" << endl;
+    cout << "switchport mode trunk" << endl;
+    cout << "switchport trunk allowed vlan 789";
+    for(size_t i = 0; i < vlans.size(); i++) {
+        cout << "," << vlans[i];
+    }
+    cout << endl;
+    cout << "no shutdown" << endl;
+    cout << " exit" << endl;
+    cout << endl;
+
+    // IP LAN
+    cout << "interface ip 0" << endl;
+    cout << " ip VLAN 789" << endl;
+    cout << " ip address " << vectorToIp(ipUsableLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << " exit" << endl;
+    cout << " ip route 0.0.0.0 0.0.0.0 " << vectorToIp(hostMinLAN) << endl;
+    cout << " " << endl;
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+// ===== Plantilla Demarcador TenGiga - Internet =====
+    void configurarDemarcadorTenGigaInternet() {
+    string nombreCliente, codigoServicio;
+    string ipWAN, mascaraWAN, ipLAN, mascaraLAN;
+    vector<string> vlans;
+    char opcionMasVlan;
+
+    // Variables para interfaces
+    int nniSeleccionada, uniSeleccionada;
+    cout << endl;
+    cout << "=== Configuracion Demarcador TenGiga - Internet ===" << endl;
+
+    // Datos básicos
+    cout << "Nombre del cliente (MAYUSCULA): "; getline(cin, nombreCliente);
+    cout << "Codigo de servicio (MAYUSCULA): "; getline(cin, codigoServicio);
+
+    // Preguntar interfaces ANTES de generar comandos
+    do {
+        cout << "Número de interface TenGiga para la WAN (1-2): ";
+        cin >> nniSeleccionada;
+        cin.ignore();
+    } while(nniSeleccionada < 1 || nniSeleccionada > 2);
+
+    do {
+        cout << "Número de interface Giga para la LAN (1-12): ";
+        cin >> uniSeleccionada;
+        cin.ignore();
+    } while(uniSeleccionada < 1 || uniSeleccionada > 12);
+
+    // WAN - pedir VLANs
+    do {
+        string vlan;
+        cout << "VLAN (2-4094): ";
+        getline(cin, vlan);
+        vlans.push_back(vlan);
+
+        cout << "¿Desea añadir otra VLAN? (s/n): ";
+        cin >> opcionMasVlan;
+        cin.ignore();
+    } while(opcionMasVlan == 's' || opcionMasVlan == 'S');
+
+    // Mostrar VLANs ingresadas
+    cout << "\n=== VLANs ingresadas ===" << endl;
+    for(size_t i = 0; i < vlans.size(); i++) {
+        cout << "VLAN " << (i+1) << ": " << vlans[i] << endl;
+    }
+
+    // LAN pública
+    do {
+        cout << "Direccion IP Gestion Demarcador: ";
+        getline(cin, ipLAN);
+    } while (!validarIP(ipLAN));
+
+    cout << "Mascara LAN (ej: 30): ";
+    getline(cin, mascaraLAN);
+    int prefijoLAN = stoi(mascaraLAN);
+
+    // ===== Calculadora LAN =====
+    vector<int> ipVecLAN = ipToVector(ipLAN);
+    vector<int> maskLAN = prefixToMask(prefijoLAN);
+    vector<int> networkLAN = calcularNetwork(ipVecLAN, maskLAN);
+    vector<int> hostMinLAN = sumarIp(networkLAN, 1);
+    vector<int> ipUsableLAN = sumarIp(networkLAN, 2); // hostMin +1
+
+    // ===== Plantilla de Configuración =====
+    string prefijo = nombreCliente.substr(0, 4);
+    string comandohostname = "hostname " + prefijo + "_" + codigoServicio;
+
+    cout << endl;
+    cout << "\033[33m=== COMANDOS DE CONFIGURACION DEMARCADOR TENGIGA ===\033[0m" << endl;
+    cout << endl;
+    cout << comandohostname << endl;
+    cout << endl;
+
+    // WAN
+    cout << "config terminal" << endl;
+    cout << "create vlan 2-4094 active" << endl;
+    cout << endl;
+    cout << "interface tengigabitethernet 1/1/" << nniSeleccionada << endl;
+    cout << " description --WAN--" << codigoServicio << "--" << endl;
+    cout << "switchport mode trunk" << endl;
+    cout << "switchport trunk allowed vlan 789";
+    for(size_t i = 0; i < vlans.size(); i++) {
+        cout << "," << vlans[i];
+    }
+    cout << endl;
+    cout << "no shutdown" << endl;
+    cout << " exit" << endl;
+    cout << endl;
+
+    // LAN
+    cout << "interface gigaethernet 1/2/" << uniSeleccionada << endl;
+    cout << " description --LAN --" << codigoServicio << "--" << endl;
+    cout << "switchport mode trunk" << endl;
+    cout << "switchport trunk allowed vlan 789";
+    for(size_t i = 0; i < vlans.size(); i++) {
+        cout << "," << vlans[i];
+    }
+    cout << endl;
+    cout << "no shutdown" << endl;
+    cout << " exit" << endl;
+    cout << endl;
+
+    // IP LAN
+    cout << "interface vlan 789" << endl;
+    cout << " ip address " << vectorToIp(ipUsableLAN) << " " << vectorToIp(maskLAN) << endl;
+    cout << " exit" << endl;
+    cout << " ip route 0.0.0.0 0.0.0.0 " << vectorToIp(hostMinLAN) << endl;
+    cout << " " << endl;
+    cout << "\033[33m=======================================\033[0m" << endl;
+    cout << "\033[33m=== ↑↑↑ SU PLANTILLA ESTA LISTA ↑↑↑ ===\033[0m" << endl;
+}
+
+
+// ===== MAIN =====
+int main() {
+    char salir;
+    char otraConfig;
+
+  do {
+    vector<string> marcas = {"Cisco", "Huawei", "Mikrotik", "Demarcador"};
+    vector<vector<string>> modelos = {
+        {"867", "C1111", "C921", "ISR 4321", "ISR 4431", "Catalyst 8000"},
+        {"AR161", "AR611", "AR617", "AR1220", "AR2220" , "AR651"},
+        {"RB750"},
+        {"RAX711", "TenGiga"}
+    };
+
+    int opcionMarca, opcionModelo, opcionServicio;
+    
+    cout << "" << endl;
+    cout << "===\033[94m POSITIVO S+ \033[0m Plantillas Configuracion de Router ===" << endl;
+    cout << "=== Diseñado por \033[93m CARLOS OLMOS \033[0m === Formador Positivo S+ ===" << endl;
+    cout << "" << endl;
+
+    // Selección de marca
+    cout << "Seleccione la marca del router:" << endl;
+    for (size_t i = 0; i < marcas.size(); i++) {
+        cout << i+1 << ". " << marcas[i] << endl;
+    }
+    cout << "Opcion: ";
+    cin >> opcionMarca;
+    opcionMarca--;
+    cout << endl;
+
+    // Selección de modelo
+    cout << "Seleccione el modelo de " << marcas[opcionMarca] << ":" << endl;
+    for (size_t i = 0; i < modelos[opcionMarca].size(); i++) {
+        cout << i+1 << ". " << modelos[opcionMarca][i] << endl;
+    }
+    cout << "Opcion: ";
+    cin >> opcionModelo;
+    opcionModelo--;
+    
+    // Selección de servicio
+    cout << "\nQue servicio se va a entregar:" << endl;
+    cout << "1 - Internet" << endl;
+    cout << "2 - Telefonia (FTTx)" << endl;
+    cout << "3 - MPLS (con BGP)" << endl;
+    cout << "4 - Telefonia SIP (FTTO)" << endl;
+    cout << "Opcion: ";
+    cin >> opcionServicio;
+    cin.ignore();
+        
+
+    // Llamada a la plantilla correspondiente
+     if (marcas[opcionMarca] == "Huawei" &&
+        modelos[opcionMarca][opcionModelo] == "AR617" &&
+        opcionServicio == 1) {
+        configurarHuaweiAR617Internet();
+    } else if (marcas[opcionMarca] == "Cisco" &&
+               modelos[opcionMarca][opcionModelo] == "867" &&
+               opcionServicio == 1) {
+        configurarCisco867Internet();
+    } else if (marcas[opcionMarca] == "Cisco" &&
+           modelos[opcionMarca][opcionModelo] == "867" &&
+           opcionServicio == 2) { // Telefonía (SIP FTTx)
+    configurarCisco867SIP_FTTx();
+    } else if (marcas[opcionMarca] == "Cisco" &&
+           modelos[opcionMarca][opcionModelo] == "867" &&
+           opcionServicio == 3) { // MPLS con BGP
+    configurarCisco867MPLS_BGP();
+    } else if (marcas[opcionMarca] == "Cisco" &&
+               modelos[opcionMarca][opcionModelo] == "867" &&
+               opcionServicio == 4) {
+        configurarCisco867SIP_FTTO();
+    } else if (marcas[opcionMarca] == "Cisco" &&
+           modelos[opcionMarca][opcionModelo] == "C1111" &&
+           opcionServicio == 1) {
+    configurarCiscoC1111Internet();
+    } else if (marcas[opcionMarca] == "Huawei" &&
+           modelos[opcionMarca][opcionModelo] == "AR617" &&
+           opcionServicio == 3) { // MPLS con BGP
+    configurarHuaweiAR617MPLS_BGP();
+    } else if (marcas[opcionMarca] == "Mikrotik" &&
+           modelos[opcionMarca][opcionModelo] == "RB750" &&
+           opcionServicio == 1) { // Internet
+    configurarMikrotikRB750Internet();
+    } else if (marcas[opcionMarca] == "Mikrotik" &&
+           modelos[opcionMarca][opcionModelo] == "RB750" &&
+           opcionServicio == 4) { // SIP por FTTO
+    configurarMikrotikRB750SIP_FTTO();
+    } else if (marcas[opcionMarca] == "Mikrotik" &&
+           modelos[opcionMarca][opcionModelo] == "RB750" &&
+           opcionServicio == 3) { // MPLS_BGP
+    configurarMikrotikRB750MPLS_BGP();
+    } else if (marcas[opcionMarca] == "Huawei" &&
+           modelos[opcionMarca][opcionModelo] == "AR1220" &&
+           opcionServicio == 1) { // Internet
+    configurarHuaweiAR1220Internet();
+    } else if (marcas[opcionMarca] == "Huawei" &&
+           modelos[opcionMarca][opcionModelo] == "AR161" &&
+           opcionServicio == 1) { // Internet
+    configurarHuaweiAR161Internet();
+    } else if (marcas[opcionMarca] == "Huawei" &&
+           modelos[opcionMarca][opcionModelo] == "AR611" &&
+           opcionServicio == 1) { // Internet
+    configurarHuaweiAR611Internet();
+    } else if (marcas[opcionMarca] == "Huawei" &&
+           modelos[opcionMarca][opcionModelo] == "AR611" &&
+           opcionServicio == 3) { // MPLS con BGP
+    configurarHuaweiAR611MPLS_BGP();
+    } else if (marcas[opcionMarca] == "Huawei" &&
+           modelos[opcionMarca][opcionModelo] == "AR617" &&
+           opcionServicio == 2) { // SIP_FTTX
+    configurarHuaweiAR617SIP_FTTX();
+    } else if (marcas[opcionMarca] == "Huawei" &&
+           modelos[opcionMarca][opcionModelo] == "AR617" &&
+           opcionServicio == 4) { // SIP_FTTO
+    configurarHuaweiAR617SIP_FTTO();
+    } else if (marcas[opcionMarca] == "Huawei" &&
+           modelos[opcionMarca][opcionModelo] == "AR651" &&
+           opcionServicio == 1) { // Internet
+    configurarHuaweiAR651Internet();
+    } else if (marcas[opcionMarca] == "Demarcador" &&
+           modelos[opcionMarca][opcionModelo] == "TenGiga" &&
+           opcionServicio == 1) { // TenGiga
+    configurarDemarcadorTenGigaInternet();
+    } else if (marcas[opcionMarca] == "Demarcador" &&
+           modelos[opcionMarca][opcionModelo] == "RAX711" &&
+           opcionServicio == 1) { // Internet
+    configurarDemarcadorRAX711Internet();
+    } else {
+      cout << "" << endl;        
+      cout << "\033[32mLO SENTIMOS este modelo/servicio aun no tiene plantilla definida.\033[0m" << endl;
+    }
+
+// Control de salida/reinicio
+while (true) {
+    cout << "\nPresione ENTER para continuar...";
+    cin.ignore(numeric_limits<streamsize>::max(), '\n'); // esperar Enter
+
+    cout << "¿Desea salir del programa? (s/n): ";
+    cin >> salir;
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+    if (salir == 's' || salir == 'S') {
+        cout << "Programa finalizado." << endl;
+        return 0; // termina aquí
+    } else if (salir == 'n' || salir == 'N') {
+        cout << "¿Desea realizar otra configuración? (s/n): ";
+        cin >> otraConfig;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+        if (otraConfig == 's' || otraConfig == 'S') {
+            // reinicia menú completo
+            break; // rompe el while interno y vuelve al menú principal
+        } else {
+            cout << "Programa finalizado." << endl;
+            return 0; // termina aquí
+        }
+    } else {
+        cout << "Opción inválida. Ingrese 's' para salir o 'n' para continuar." << endl;
+    }
+}
+
+  } while(true); // bucle principal infinito, controlado por return
+
+
+}
+
+
